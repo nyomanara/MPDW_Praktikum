@@ -1,0 +1,320 @@
+title: "MPDW_TUGAS PRAK 1"
+author: "Nyoman Kiranasassi Anara"
+date: "2025-08-31"
+output: html_document
+---
+
+Notes: Ada beberapa plot yang tidak bisa dirun saat eksplorasi data time series, kebanyakan errornya seperti ini Error: unable to find an inherited method for function ‘plot’ for signature ‘x = "HoltWinters", sudah saya coba cari cara lain tapi belum terpecahkan jadinya saya lanjut perhitungan aja, kak.
+
+```{r}
+library("forecast")
+library("graphics")
+library("TTR")
+library("TSA")
+```
+### IMPORT DATA
+
+```{r}
+library(readxl)
+data_kopi <- read_excel("C:/Users/USER/Downloads/coffe_prices_kelompok.xlsx")
+
+data <- data_kopi[201:300, ]
+data
+```
+## Eksplorasi
+```{r}
+#Eksplorasi
+
+View(data)
+str(data)
+dim(data)
+```
+
+```{r}
+# Ubah ke Time Series
+data.ts <- ts(data$price)
+summary(data.ts)
+```
+## Plot Data
+
+```{r}
+#Plot
+ts.plot(data.ts, xlab="Time Period ", ylab="Price", 
+        main = "Time Series Plot")
+points(data.ts)
+```
+Terlihat bahwa data mempunyai pola tren menurun yang lumayan tajam di awal dan mulai konstan di akhir.
+
+
+### SMA
+
+```{r}
+#Pembagian data uji
+training_ma <- data[1:80, ]
+testing_ma  <- data[81:100, ]
+```
+
+```{r}
+# Ubah ke objek time series
+train_ma.ts <- ts(training_ma$price)
+test_ma.ts  <- ts(testing_ma$price)
+
+# SMA dengan periode 5
+sma <- SMA(train_ma.ts, n = 5)
+
+# Hapus NA dari SMA agar seimbang dengan data actual
+common_data <- na.omit(data.frame(actual = train_ma.ts, forecast = sma))
+
+```
+
+```{r}
+data.ramal<-c(NA,sma)
+data.ramal
+data.gab<-cbind(aktual=c(train_ma.ts,rep(NA,24)),pemulusan=c(sma,rep(NA,24)),ramalan=c(data.ramal,rep(data.ramal[length(data.ramal)],23)))
+data.gab #forecast 24 periode ke depan
+```
+
+
+
+```{r}
+ts.plot(data.ts, xlab="Time Period ", ylab="Price", main= "SMA N=5 Data Harga")
+points(data.ts)
+lines(data.gab[,2],col="green",lwd=2)
+lines(data.gab[,3],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.5)
+```
+Karena metode SMA tidak mempertimbangkan tren ke depan, garis merah biasanya menjadi garis konstan yang mengikuti rata-rata beberapa titik terakhir dari data latih.
+
+
+
+```{r}
+
+## Uji Akurat Data Latih
+# Hitung error
+error <- common_data$actual - common_data$forecast
+SSE <- sum(error^2)
+MSE <- mean(error^2)
+MAPE <- mean(abs(error / common_data$actual) * 100)
+
+# Tampilkan matriks akurasi
+akurasi <- matrix(c(SSE, MSE, MAPE), nrow = 3)
+rownames(akurasi) <- c("SSE", "MSE", "MAPE")
+colnames(akurasi) <- c("SMA(5)")
+akurasi
+```
+```{r}
+# Uji Akurat Data Uji
+error_test.sma = test_ma.ts-data.gab[81:100,3]
+SSE_test.sma = sum(error_test.sma^2)
+MSE_test.sma = mean(error_test.sma^2)
+MAPE_test.sma = mean(abs((error_test.sma/test_ma.ts*100)))
+
+akurasi_test.sma <- matrix(c(SSE_test.sma, MSE_test.sma, MAPE_test.sma))
+row.names(akurasi_test.sma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.sma) <- c("Akurasi m = 4")
+akurasi_test.sma
+
+```
+
+
+Nilai MAPE biasanya yang digunakan untuk mengevaluasi suatu model, karena nilai ini sudah ada rentang yang absolut untuk mengukur kebaikan suatu model, dibandingkan dengan SSE dan MSE yang bergantung dari jenis datanya. Untuk hasil nilai MAPE dari data uji di atas berada pada sekitar 8.6% menunjukan rata-rata prediksi model meleset sekitar 8.6% dari nilai harga aktual. Nilai MAPE yang kurang dari 10% juga dianggap model sangat baik.
+
+### Double Moving Average (DMA)
+
+```{r}
+dma <- SMA(sma, n = 6)
+At <- 2*sma - dma
+Bt <- 2/(4-1)*(sma - dma)
+data.dma<- At+Bt
+data.ramal2<- c(NA, data.dma)
+
+t = 1:24
+f = c()
+
+for (i in t) {
+  f[i] = At[length(At)] + Bt[length(Bt)]*(i)
+}
+
+data.gab2 <- cbind(aktual = c(train_ma.ts,rep(NA,24)), pemulusan1 = c(sma,rep(NA,24)),pemulusan2 = c(data.dma, rep(NA,24)),At = c(At, rep(NA,24)), Bt = c(Bt,rep(NA,24)),ramalan = c(data.ramal2, f[-1]))
+data.gab2
+```
+
+```{r}
+ts.plot(data.ts, xlab="Time Period ", ylab="Harga", main= "DMA N=6 Harga")
+points(data.ts)
+lines(data.gab2[,3],col="green",lwd=2)
+lines(data.gab2[,6],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.8)
+
+```
+DMA digunakan untuk memperhalus data dan melihat tren lebih jelas.Titik hitam pada grafik menunjukkan data aktual, yaitu harga sebenarnya di setiap periode waktu. Garis hijau menggambarkan data pemulusan yang dihasilkan melalui metode DMA, di mana proses pemulusan dilakukan dua kali. Sementara itu, garis merah merepresentasikan nilai ramalan atau forecast yang dihasilkan oleh model DMA untuk periode waktu berikutnya.
+```{r}
+## Uji Akurasi Data Latih
+# Hilangkan NA sebelum menghitung error
+valid_index <- which(!is.na(data.ramal2[1:length(train_ma.ts)]))
+
+error_train.dma <- train_ma.ts[valid_index] - data.ramal2[valid_index]
+
+SSE_train.dma <- sum(error_train.dma^2)
+MSE_train.dma <- mean(error_train.dma^2)
+MAPE_train.dma <- mean(abs(error_train.dma / train_ma.ts[valid_index]) * 100)
+
+akurasi_train.dma <- matrix(c(SSE_train.dma, MSE_train.dma, MAPE_train.dma))
+row.names(akurasi_train.dma) <- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.dma) <- c("Akurasi m = 6")
+akurasi_train.dma
+
+```
+
+```{r}
+#Menghitung nilai keakuratan data uji
+error_test.dma = test_ma.ts-data.gab2[81:100,6]
+SSE_test.dma = sum(error_test.dma^2)
+MSE_test.dma = mean(error_test.dma^2)
+MAPE_test.dma = mean(abs((error_test.dma/test_ma.ts*100)))
+
+akurasi_test.dma <- matrix(c(SSE_test.dma, MSE_test.dma, MAPE_test.dma))
+row.names(akurasi_test.dma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.dma) <- c("Akurasi m = 6")
+akurasi_test.dma
+```
+Hasil pengujian akurasi model peramalan dengan parameter m = 6 menunjukkan nilai MAPE sebesar 38.64% menunjukkan bahwa rata-rata kesalahan prediksi model berada di kisaran 38,6% dari nilai aktual, hal ini berada pada kategori akurasi model pada tingkat sedang.Secara keseluruhan, hasil ini menunjukkan bahwa model dengan parameter m = 6 belum memberikan akurasi yang memuaskan, sehingga perlu dilakukan penyesuaian, seperti mencoba nilai parameter m yang berbeda atau menggunakan metode peramalan lain agar hasil prediksi menjadi lebih akurat.
+
+
+## Single Exponential Smoothing & Double Exponential Smoothing
+```{r}
+#membagi training dan testing
+training<-data[1:50,]
+testing<-data[51:100,]
+train.ts <- ts(training$price)
+test.ts  <- ts(testing$price)
+
+class(train.ts)
+class(test.ts)
+
+```
+
+
+```{r}
+library(ggplot2)
+ggplot() + 
+  geom_line(data = training, aes(x = Date_monthly, y = price, col = "Data Latih")) +
+  geom_line(data = testing, aes(x = Date_monthly, y = price, col = "Data Uji")) +
+  labs(x = "Periode Waktu", y = "Harga", color = "Legend") +
+  scale_colour_manual(name="Keterangan:", breaks = c("Data Latih", "Data Uji"),
+                      values = c("blue", "red")) + 
+  theme_bw() + theme(legend.position = "bottom",
+                     plot.caption = element_text(hjust=0.5, size=12))
+```
+### SES
+
+Data ini tidak bisa dilakukan SES karena data bersifat trend bukan konstan. SES memperhitungkan level (nilai rata-rata saat ini) dari data.
+
+
+### DES
+
+```{r}
+#Lamda=0.2 dan gamma=0.2
+des.1<- HoltWinters(train.ts, gamma = FALSE, beta = 0.2, alpha = 0.2)
+
+h_test <- length(testing$price)
+
+ramalandes1 <- forecast(des.1, h = h_test)
+ramalandes1
+
+
+#Lamda=0.6 dan gamma=0.3
+des.2<- HoltWinters(train.ts, gamma = FALSE, beta = 0.3, alpha = 0.6)
+
+#ramalan
+ramalandes2 <- forecast(des.2, h = h_test)
+ramalandes2
+
+
+```
+
+
+```{r}
+#Lamda dan gamma optimum
+des.opt<- HoltWinters(train.ts, gamma = FALSE)
+des.opt
+
+#ramalan
+ramalandesopt<- forecast(des.opt, h=length(testing$price))
+ramalandesopt
+selisihdes1 <- ramalandesopt$mean - testing$price
+```
+
+
+#### Akurasi Data Latih
+
+```{r}
+#Akurasi Data Training
+ssedes.train1<-des.1$SSE
+msedes.train1<-ssedes.train1/length(train.ts)
+sisaandes1<-ramalandes1$residuals
+head(sisaandes1)
+
+mapedes.train1 <- sum(abs(sisaandes1[3:length(train.ts)]/train.ts[3:length(train.ts)])
+                      *100)/length(train.ts)
+
+akurasides.1 <- matrix(c(ssedes.train1,msedes.train1,mapedes.train1))
+row.names(akurasides.1)<- c("SSE", "MSE", "MAPE")
+colnames(akurasides.1) <- c("Akurasi lamda=0.2 dan gamma=0.2")
+akurasides.1
+
+ssedes.train2<-des.2$SSE
+msedes.train2<-ssedes.train2/length(train.ts)
+sisaandes2<-ramalandes2$residuals
+head(sisaandes2)
+
+mapedes.train2 <- sum(abs(sisaandes2[3:length(train.ts)]/train.ts[3:length(train.ts)])
+                      *100)/length(train.ts)
+
+akurasides.2 <- matrix(c(ssedes.train2,msedes.train2,mapedes.train2))
+row.names(akurasides.2)<- c("SSE", "MSE", "MAPE")
+colnames(akurasides.2) <- c("Akurasi lamda=0.6 dan gamma=0.3")
+akurasides.2
+```
+
+#### Akurasi Data Uji
+
+```{r}
+#Akurasi Data Testing
+
+
+selisihdes1<-ramalandes1$mean-testing$price
+selisihdes1
+
+SSEtestingdes1<-sum(selisihdes1^2)
+MSEtestingdes1<-SSEtestingdes1/length(testing$price)
+MAPEtestingdes1<-sum(abs(selisihdes1/testing$price)*100)/length(testing$price)
+
+selisihdes2<-ramalandes2$mean-testing$price
+selisihdes2
+
+
+SSEtestingdes2<-sum(selisihdes2^2)
+MSEtestingdes2<-SSEtestingdes2/length(testing$price)
+MAPEtestingdes2<-sum(abs(selisihdes2/testing$price)*100)/length(testing$price)
+
+selisihdesopt<-ramalandesopt$mean-testing$price
+selisihdesopt
+
+SSEtestingdesopt<-sum(selisihdesopt^2)
+MSEtestingdesopt<-SSEtestingdesopt/length(testing$price)
+MAPEtestingdesopt<-sum(abs(selisihdesopt/testing$price)*100)/length(testing$price)
+
+akurasitestingdes <-
+  matrix(c(SSEtestingdes1,MSEtestingdes1,MAPEtestingdes1,SSEtestingdes2,MSEtestingdes2,
+           MAPEtestingdes2,SSEtestingdesopt,MSEtestingdesopt,MAPEtestingdesopt),
+         nrow=3,ncol=3)
+row.names(akurasitestingdes)<- c("SSE", "MSE", "MAPE")
+colnames(akurasitestingdes) <- c("des ske1","des ske2","des opt")
+akurasitestingdes
+```
+Walaupun metode DSE dilakukan untuk data yang mengandung pola trend, hasil perhitungan SSE MSE dan MAPE dari metode DSE menunjukkan bahwa model tidak bisa menangkap pola sebenarnya sehingga menghasilkan prediksi yang jauh dari aktual. Hal ini juga dapat terjadi karena pegambilan nilai alpha dan beta yang burang tepat. Terlebih data ini mengandung trend atau lonjakan yang tinggi sehingga error makin besar. 
+
+
+Hasil dari uji yang dilakukan diatas, dapat disimpulkan bahwa metode SMA menghasilkan Nilai MAPE yang paling kecil dibandingan dengan MAPE DMA yang berada dikategori cukup dan MAPE DSE yang sangan buruk, sehingga metode SMA cocok dipakai untuk data kopi dari baris 201 hingga 300.
+
