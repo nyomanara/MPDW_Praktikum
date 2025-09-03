@@ -1,0 +1,142 @@
+---
+title: "MPDW_Tugas Kuliah"
+output: html_document
+date: "2025-08-28"
+---
+## IMPORT DATA
+```{r}
+library(readxl)
+s = read_xlsx("C:/Users/USER/Documents/MPDW_Praktikum/data ipm.xlsx")
+s
+```
+
+## Eksplorasi Plot
+
+```{r}
+#Plot s
+plot(s$x, s$y, type="b", col="blue", pch=19, xlab="Tahun", ylab="IPM", main="Plot IPM Bengkulu")
+```
+
+## Buat Time Series
+```{r}
+s.ts <- ts(s$y)
+summary(s.ts)
+ts.plot(s.ts, main="Time Series IPM Bengkulu", ylab="IPM", xlab="Tahun")
+points(s.ts, col="red", pch=19)
+```
+
+
+## Uji Auto Korelasi
+
+```{r}
+reg = lm(y ~ x, data = s)
+summary(reg)
+#dwtest
+library(lmtest)
+dwtest(reg)
+#Plot ACF
+acf(reg$residuals, main="ACF Residuals Regresi IPM Bengkulu")
+#Plot residual vs order
+plot(reg$residuals, type="b", main="Plot Residuals Regresi IPM Bengkulu", ylab="Residuals", xlab="Order")
+
+```
+
+### Penanganan
+
+#### Metode 1 Cochrane-Orcutt
+
+```{r}
+model_co <- cochrane.orcutt(reg)
+summary(model_co)
+
+# rho paling optimum
+rho <- model_co$rho
+cat(" Rho optimum:", rho)
+```
+
+```{r}
+ipm.trans <- s$y[-1] - s$y[-14]*rho
+
+tahun.trans <- s$x[-1] - s$x[-14]*rho
+model_co_manual <- lm(ipm.trans~tahun.trans)
+
+b0_co_manual <- coef(model_co_manual)[1]/(1-rho)
+b1_co_manual <- coef(model_co_manual)[2]
+cat("Koefisien manual Cochrane-Orcutt:\n")
+cat("b0:", b0_co_manual, "\n")
+cat("b1:", b1_co_manual, "\n")
+```
+
+#### Metode 2 HIldreth-LU
+
+```{r}
+hildreth.lu.func<- function(r, model){
+  x <- model.matrix(model)[,-1]
+  y <- model.response(model.frame(model))
+  n <- length(y)
+  t <- 2:n
+  y <- y[t]-r*y[t-1]
+  x <- x[t]-r*x[t-1]
+  
+  return(lm(y~x))
+}
+
+#Pencariab rho yang meminimumkan SSE
+r <- c(seq(0.1,0.9, by= 0.1))
+tab <- data.frame("rho" = r, "SSE" = sapply(r, function(i){deviance(hildreth.lu.func(i, reg))}))
+round(tab, 4)
+```
+
+```{r}
+rOpt <- seq(0.6,0.8, by= 0.001)
+tabOpt <- data.frame("rho" = rOpt, "SSE" = sapply(rOpt, function(i){deviance(hildreth.lu.func(i, reg))}))
+head(tabOpt[order(tabOpt$SSE),])
+```
+
+
+```{r}
+par(mfrow = c(1,1))
+plot(tab$SSE ~ tab$rho , type = "l", xlab = "Rho", ylab = "SSE")
+abline(v = tabOpt[tabOpt$SSE==min(tabOpt$SSE),"rho"], lty = 2, col="red",lwd=2)
+text(x=0.719, y=0.2667970, labels = "rho=0.719", cex = 1)
+```
+
+
+```{r}
+model_hl <- hildreth.lu(s$y, s$x, rho = 0.719)
+summary(model_hl)
+```
+
+
+```{r}
+# Transformasi Balik
+cat("y = ", coef(model_hl)[1]/(1-0.719), "+", coef(model_hl)[2],"x", sep = "")
+```
+
+
+```{r}
+dwtest(model_hl)
+```
+
+
+
+### Perbandingan Hasil penanganan 
+
+```{r}
+sse_awal <- sum(residuals(reg)^2)
+sse_co <- sum(residuals(model_co)^2)
+sse_hl <- sum(residuals(model_hl)^2)
+
+# Membuat tabel perbandingan
+data.frame(
+  Metode = c("Model Awal (Sakit)", "Cochrane-Orcutt (Sehat)", "Hildreth-Lu (Sehat)"),
+  SSE = c(sse_awal, sse_co, sse_hl),
+  DW_Statistic = c(dwtest(reg)$statistic, model_co$DW[3], dwtest(model_hl)$statistic)
+)
+
+```
+Berdasarkan tabel di atas, terlihat bahwa model awal memiliki nilai SSE sebesar 0,9367 dengan hasil uji Durbin-Watson 0,4488, yang menunjukkan adanya autokorelasi positif pada residual. Meskipun nilai SSE relatif kecil, model ini tidak valid karena melanggar asumsi independensi error, sehingga hasil estimasi koefisien menjadi bias. Setelah dilakukan penanganan menggunakan metode Cochrane-Orcutt, nilai DW Statistic meningkat menjadi 1,4304, yang menandakan bahwa masalah autokorelasi telah berkurang atau hilang. Namun, nilai SSE justru meningkat menjadi 3,1203 karena model menyesuaikan struktur error agar lebih acak, meskipun hal ini membuat total error terlihat lebih besar. Sementara itu, metode Hildreth-Lu juga berhasil mengatasi autokorelasi dengan DW Statistic 1,4300, tetapi menghasilkan SSE yang jauh lebih kecil yaitu 0,2668, menunjukkan bahwa metode ini lebih efisien dalam menangkap struktur data setelah koreksi.
+
+
+
+
